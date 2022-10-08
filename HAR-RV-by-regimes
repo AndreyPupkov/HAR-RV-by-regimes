@@ -1,0 +1,374 @@
+#обобщенная программа для N-режимов
+
+#Фильтрация данных (без данных за сб)
+install.packages("stringr")
+library("stringr")
+
+close_data=function(x)#x-матрица: 1 столбец - дата/время, 2 столбец - цена
+{
+  date1=trunc.POSIXt(x[1,1],"day")+60*60*24
+  j=1
+  i=1
+  S=0
+  z=data.frame("datetime"=date1-60*60*24,"SnP500"=1000)
+  while(j<=nrow(x))
+  {
+    if(x[j,1]<=date1)
+    {
+      j=j+1
+    }
+    else
+    {
+      z=rbind(z,data.frame("datetime"=date1-1,"SnP500"=x[j,2]))
+      date1=trunc.POSIXt(x[j,1],"day")+60*60*24
+      i=i+1
+      S=0
+    }
+  }
+  colnames(z)=c("date_time","SnP500")
+  return(z[-1,])
+}
+
+rtns=function(x)#x-матрица: 1 столбец - дата/время, 2 столбец - цена
+{
+  t=x[2:nrow(x),1]
+  y=double(nrow(x)-1)
+  for (i in 2:(nrow(x)))
+  {
+    y[i-1]=log(x[i,2]/x[i-1,2])
+  }
+  z=data.frame(t,y)
+  colnames(z)=c("date_time","log-rtns S&P500")
+  return(z)
+}
+
+RV_f=function(x)#x-матрица: 1 столбец - дата/время, 2 столбец - доходности
+{
+  date1=trunc.POSIXt(x[1,1],"day")+60*60*24
+  j=1
+  i=1
+  S=0
+  z=data.frame("datetime"=date1-60*60*24,"RV"=1000)
+  while(j<=nrow(x))
+  {
+    if(x[j,1]<=date1)
+    {
+      S=S+x[j,2]^2
+      j=j+1
+    }
+    else
+    {
+      z=rbind(z,data.frame("datetime"=date1-1,"RV"=sqrt(S)))
+      date1=trunc.POSIXt(x[j,1],"day")+60*60*24
+      i=i+1
+      S=0
+    }
+  }
+  colnames(z)=c("date_time","RV")
+  return(z[-1,])
+}
+
+
+x=read.table(file="SnP500_5min.txt",header=TRUE,colClasses = c("character","character",NA,NA,NA,"double",NA))#5min
+
+#time=as.Date(x[,1],"%d%m%y")
+data_time=as.POSIXct(str_c(as.character(as.Date(x[,1],"%d%m%y"))," ",substr(x[,2],1,2),":",substr(x[,2],3,4),":","00"))
+data_5min=data.frame(data_time,x[,6])
+colnames(data_5min)=c("date_time","S&P500")
+#as.POSIXct("1970-01-01 00:00:00", format ="%Y-%m-%d %H:%M:%S", tz = "UTC")<date_data[1,1]&&date_data[1,1]<as.POSIXct("2001-02-16 14:00:01", format ="%Y-%m-%d %H:%M:%S", tz = "UTC")
+data_5min_biasTime=data.frame(data_5min[,1]-60*60*4,x[,6])
+colnames(data_5min_biasTime)=c("date_time","S&P500")
+
+close_dat=close_data(data_5min_biasTime)
+rtn_5min=rtns(data_5min_biasTime)
+rtn_1day=rtns(close_dat)
+RV=RV_f(rtn_5min)
+
+
+#5min
+plot(data_5min[,1],data_5min[,2],type='l',xlab = "",ylab = "",main = "S&P500")
+#,xlim = c(as.POSIXct("2005-03-01 17:00:00"),as.POSIXct("2005-03-02 01:00:50"))
+plot(rtn_5min[,1],rtn_5min[,2],type='l',xlab = "",ylab = "",main = "log-returns of S&P500 by 5min")
+plot(rtn_5min[,1],rtn_5min[,2],ylim=c(-0.02,0.02),type='l',xlab = "",ylab = "",main = "log-returns of S&P500 by 5min",xlim = c(as.POSIXct("2001-02-17 00:00:00"),as.POSIXct("2001-03-15 00:00:00")))
+#,xlim = c(as.POSIXct("2008-10-01 17:00:00"),as.POSIXct("2008-11-02 01:00:50"))
+lines(RV[,1],RV[,2],col="blue")
+abline(v=RV[,1],col="grey")
+
+#1day
+plot(close_dat[,1],close_dat[,2],type='l',xlab = "",ylab = "",main = "S&P500 by 1day")
+plot(rtn_1day[,1],rtn_1day[,2],col="grey",type='l',xlab = "",ylab = "",main = "log-returns of S&P500 by 1day and RV")
+#,xlim = c(as.POSIXct("2018-10-01 00:00:00"),as.POSIXct("2018-11-02 00:00:00"))
+#,xlim = c(as.POSIXct("2008-10-01 17:00:00"),as.POSIXct("2008-11-02 01:00:50"))
+lines(RV[,1],RV[,2],col="blue")
+#abline(v=RV[,1],col="grey")
+plot(RV[,1],RV[,2],col="blue",main="Realized volatility",ylab="",xlab = "")
+#,xlim = c(as.POSIXct("2014-10-01 17:00:00"),as.POSIXct("2014-05-02 01:00:50")),ylim = c(0,0.01)
+
+
+#Режимы
+#plot(rv_t[,1],sqrt(rv_t[,2]),col='blue')
+Discr=function(x,alp)#x-матрица: 1 столбец - дата/время, 2 столбец - RV
+{
+  y=x
+  for (i in 1:nrow(x))
+  {
+    if(x[i,2]<alp)
+    {
+      y[i,2]="1"
+    }
+    else
+    {
+      y[i,2]="2"
+    }
+  }
+  return(y)
+}
+
+#Деление данных на дискретные значения в зависимости от угла касательной
+Discr_angle=function(x,beta)#x-матрица: 1 столбец - дата/время, 2 столбец - RV, beta - угол, делящий pi/2 на 2 части
+{
+  alfa=0
+  y=x
+  y[1,2]="1"
+  z=max(x[2:nrow(x),2]-x[1:(nrow(x)-1),2])
+  for(i in 2:nrow(x))
+  {
+    alfa=x[i,2]-x[(i-1),2]
+    if(abs(alfa/z)<=beta)
+    {
+      y[i,2]="1"
+    }
+    if(alfa/z>beta)
+    {
+      y[i,2]="2"
+    }
+    if(alfa/z<(-beta))
+    {
+      y[i,2]="3"
+    }
+  }
+  return(y)
+}
+
+num=function(x,n)#x-матрица: 1 столбец - дата/время, 2 столбец - RV, n - количество возможных скрытых состояний
+{
+  y=double(nrow(x))
+  for (i in 1:nrow(x)) 
+  {
+    for(j in 1:n)
+    {
+      if(x[i,2]==LETTERS[j])
+      {
+        y[i]=j/n
+      }
+    }
+  }
+  return(data.frame("data_time"=x[,1],"regime"=y))
+}
+
+Divide_data_on_regs=function(x,reg,n)#x-матрица: 1 столбец - дата/время, 2 столбец - RV, n - количество возможных скрытых состояний,regs - последовательность точек, соответствующих режимам
+{
+  y=data.frame("date_time"=x[,1])
+  for(j in 1:n)
+  {
+    s=double(nrow(x))
+    for(i in 1:nrow(x))
+    {
+      if(reg[i,2]==j/n)
+      {
+        s[i]=x[i,2]
+      }
+      else
+      {
+        s[i]=NA
+      }
+    }
+    y=cbind(y,s)
+  }
+  colnames(y)=c("date_time",LETTERS[1:n])
+  return(y)
+}
+
+colored_RV=function(x,reg,n)#x-матрица: 1 столбец - дата/время, 2 столбец - RV, n - количество возможных скрытых состояний,regs - последовательность точек, соответствующих режимам
+{
+  plot(x[,1],x[,2],type = "n",xlab = "",ylab = "",main = "Regimes of RV")
+  for(i in 1:nrow(x))
+  {
+    for(j in 1:n)
+    {
+      if(reg[i,2]==j/n)
+      {
+        lines(x[i,1],x[i,2],type = "p",col=as.character(j))
+      }
+    }
+  }
+}
+
+#Деление на n режимов
+library("HMM")
+alp=0.009#параметр, отвечающий за деление процесса на возможные дискретные значения(HV,LV)
+beta=0.05#параметр, отвечающий за деление процесса на возможные дискретные значения (angle)
+m=3000#Объем выборки для оценивания HMM
+observation = Discr(RV[1:m,],alp)#Деление выборки на дискретные значения (HV,LV)
+#observation = Discr_angle(RV[1:m,],beta)
+n=3#количество состояний
+k=3#количество возможно принимаемых значений процессом
+a=matrix(abs(rnorm(n^2)),n,n)
+transProb=a/rowSums(a)#начальный вариант переходной вероятности
+b=matrix(abs(rnorm(n*k)),n,k)
+emissionProbs=b/rowSums(b)#начальный вариант эмиссионной матрицы
+condition=LETTERS[1:n]#возможные значения состояний
+value=as.character(c(1:k))#возможные дискретные значения процесса 
+hmm = initHMM(condition,value,transProbs=transProb,emissionProbs=emissionProbs)
+print(hmm)
+
+bw = baumWelch(hmm,observation[,2],200)#Определение параметров HMM
+print(bw)
+
+hmm = initHMM(condition,value,transProbs=bw$hmm$transProbs,emissionProbs=bw$hmm$emissionProbs)
+observation = Discr(RV,alp)
+#observation = Discr_angle(RV,beta)
+regimes=data.frame("data/time"=RV[,1],"regime"=viterbi(hmm,observation[,2]))
+regs=num(regimes,n)
+
+plot(RV[,1],RV[,2],col="blue")
+lines(regs[,1],regs[,2]*max(RV[,2]),type='p')
+abline(v=RV[m,1])
+
+#разноцветный график
+colored_RV(RV,regs,n)
+
+
+D_D=Divide_data_on_regs(RV,regs,n)
+
+#Оценивание HAR-RV на различных режимах
+
+HAR_RV=function(beta,i,RV)#inx - индекс даты в матрице на которую вычисляется значение модели,RV - значение RV, beta -вектор параметров
+{
+  RVW=mean(RV[(i-4):i,2])
+  RVM=mean(RV[(i-21):i,2])
+  return(beta[1]+beta[2]*RV[i,2]+beta[3]*RVW+beta[4]*RVM)
+}
+
+MNK_HAR_RV=function(beta,RV,M)#beta - параметры модели, RV - данные, M - max объем обучающей выборки
+{
+  s=0
+  for(i in 23:M)
+  {
+    s=s+(RV[i,2]-HAR_RV(beta,(i-1),RV))^2
+  }
+  return(s)
+}
+
+
+est_HARRV_by_regs=function(regs,RV,n)
+{
+  y=data.frame("regime"=LETTERS[1:n],"int"=0,"day"=0,"week"=0,"month"=0)
+  z=data.frame(RV,"regime"=regs[,2])
+  for(i in 1:n)
+  {
+    z1=z[z$regime==i/n,][,1:2]
+    b=optim(par=c(0,0,0,0),fn=MNK_HAR_RV,RV=z1,M=nrow(z1))$par
+    y[i,2:5]=b
+  }
+  return(y)
+}
+
+estPar=est_HARRV_by_regs(regs[1:m,],RV[1:m,],n)
+
+
+plot_estHARRV=function(y,n)
+{
+  plot(as.double(estPar[1,2:5]),main="Coefficients of HAR-RV by regimes",type="o",ylim = c(min(estPar[,2:5]),max(estPar[,2:5])),xlab = "",ylab="")
+  for(i in 2:n)
+  {
+    lines(as.double(estPar[i,2:5]),type="o",col=as.character(i))
+  }
+  abline(h=0)
+}
+plot_estHARRV(estPar,n)
+
+beta0=function(est,i,reg)
+{
+  return(est[est[,1]==reg[i,2],2])
+}
+beta1=function(est,i,reg)
+{
+  return(est[est[,1]==reg[i,2],3])
+}
+beta2=function(est,i,reg)
+{
+  s=0
+  for(j in 1:5)
+  {
+    s=s+est[est[,1]==reg[i-j+1,2],4]
+  }
+  return(s/5)
+}
+beta3=function(est,i,reg)
+{
+  s=0
+  for(j in 1:22)
+  {
+    s=s+est[est[,1]==reg[i-j+1,2],5]
+  }
+  return(s/22)
+}
+
+
+forcast_HARRV_byRegimes=function(par,regs,RV,m)#par - матрица значений параметров HARRV по режимам, regs - таблица с символьными значениями состояний 
+{
+  fc=data.frame(RV[,1],"forecaste RV"=0)
+  fc[1:m,2]=RV[1:m,2]
+  for(i in (m+1):nrow(RV))
+  {
+    RVW=mean(RV[(i-5):(i-1),2])
+    RVM=mean(RV[(i-22):(i-1),2])
+    fc[i,2]=beta0(par,i-1,regs)+beta1(par,i-1,regs)*RV[i-1,2]+beta2(par,i-1,regs)*RVW+beta3(par,i-1,regs)*RVM
+  }
+  return(fc)
+}
+
+beta00=function(est,i,reg,z)
+{
+  return(est[est[,1]==reg[i,2],z])
+}
+
+forcast_HARRV_byRegimes1=function(par,regs,RV,m)#par - матрица значений параметров HARRV по режимам, regs - таблица с символьными значениями состояний 
+{
+  fc=data.frame(RV[,1],"forecaste RV"=0)
+  fc[1:m,2]=RV[1:m,2]
+  for(i in (m+1):nrow(RV))
+  {
+    RVW=mean(RV[(i-5):(i-1),2])
+    RVM=mean(RV[(i-22):(i-1),2])
+    fc[i,2]=beta00(par,i-1,regs,2)+beta00(par,i-1,regs,3)*RV[i-1,2]+beta00(par,i-1,regs,4)*RVW+beta00(par,i-1,regs,5)*RVM
+  }
+  return(fc)
+}
+
+forcast=forcast_HARRV_byRegimes(estPar,regimes,RV,m)
+forcast1=forcast_HARRV_byRegimes1(estPar,regimes,RV,m)
+
+
+err=function(RV,fc)
+{
+  s=0
+  for(i in 1:nrow(RV))
+  {
+    s=s+(RV[i,2]-fc[i,2])^2
+  }
+  return(s)
+}
+err(RV,forcast)
+err(RV,forcast1)
+
+a="2020-02-12 23:59:59 UTC"
+b="2020-05-20 23:59:59 UTC"
+abline(v=as.POSIXct("2016-02-01 23:59:59 UTC"))
+plot(RV[,1],RV[,2],col="red",type="n",xlim = c(as.POSIXct(a),as.POSIXct(b)),ylim = c(0,max(RV[which(RV[,1]==a):which(RV[,1]==b),2])),xlab = "",ylab = "",main="Forecast of RV by 1 day")
+abline(v=RV[,1],col="grey")
+lines(forcast[,1],forcast[,2],type="h",lwd=3)
+lines(RV[,1],RV[,2],col="red",type="o",xlim = c(as.POSIXct(a),as.POSIXct(b)),ylim = c(0,max(RV[which(RV[,1]==a):which(RV[,1]==b),2])))
+lines(forcast[,1],forcast1[,2],col="green")
+lines(regs[,1],regs[,2]*max(RV[which(RV[,1]==a):which(RV[,1]==b),2]),type='p',col="red",)
